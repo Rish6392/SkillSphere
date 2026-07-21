@@ -126,10 +126,7 @@ exports.sendMessage = async (req, res) => {
     // Emit via Socket.IO if available
     const io = req.app.get("io");
     if (io) {
-      io.to(receiverId.toString()).emit("new_message", {
-        message,
-        conversationId: conversation._id,
-      });
+      io.to(receiverId.toString()).emit("new_message", message);
     }
 
     res.status(201).json({

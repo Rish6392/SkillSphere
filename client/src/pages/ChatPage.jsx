@@ -1,12 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchConversations, fetchMessages, addMessage, setOnlineUsers, setTyping } from '@/redux/slices/chatSlice';
+import { fetchConversations, fetchMessages, addMessage, setOnlineUsers, setTyping, setActiveConversationId } from '@/redux/slices/chatSlice';
 import { getSocket, connectSocket } from '@/services/socket';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Send, Image, MessageSquare } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import api from '@/services/api';
+import toast from 'react-hot-toast';
 
 export default function ChatPage() {
   const dispatch = useDispatch();
@@ -15,31 +18,69 @@ export default function ChatPage() {
   const [activeConvo, setActiveConvo] = useState(null);
   const [newMessage, setNewMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
   useEffect(() => {
     dispatch(fetchConversations());
     const token = localStorage.getItem('token');
-    if (token) {
-      const socket = connectSocket(token);
-      socket.on('new_message', (msg) => dispatch(addMessage(msg)));
-      socket.on('online_users', (users) => dispatch(setOnlineUsers(users)));
-      socket.on('user_typing', ({ userId, conversationId }) =>
-        dispatch(setTyping({ conversationId, userId, isTyping: true }))
-      );
-      socket.on('user_stop_typing', ({ userId, conversationId }) =>
-        dispatch(setTyping({ conversationId, userId, isTyping: false }))
-      );
-    }
+    if (!token) return;
+
+    const socket = connectSocket(token);
+
+    const handleNewMessage = (msg) => {
+      dispatch(addMessage(msg));
+      dispatch(fetchConversations()); // Refresh list to get new conversations/badges
+    };
+    const handleOnlineUsers = (users) => dispatch(setOnlineUsers(users));
+    const handleUserTyping = ({ userId, conversationId }) => dispatch(setTyping({ conversationId, userId, isTyping: true }));
+    const handleUserStopTyping = ({ userId, conversationId }) => dispatch(setTyping({ conversationId, userId, isTyping: false }));
+
+    socket.on('new_message', handleNewMessage);
+    socket.on('online_users', handleOnlineUsers);
+    socket.on('user_typing', handleUserTyping);
+    socket.on('user_stop_typing', handleUserStopTyping);
+
+    return () => {
+      socket.off('new_message', handleNewMessage);
+      socket.off('online_users', handleOnlineUsers);
+      socket.off('user_typing', handleUserTyping);
+      socket.off('user_stop_typing', handleUserStopTyping);
+    };
   }, [dispatch]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Handle new chat request from URL parameters
+  useEffect(() => {
+    const userId = searchParams.get('userId');
+    const name = searchParams.get('name');
+    const gigId = searchParams.get('gigId');
+
+    if (userId) {
+      // Check if conversation already exists
+      const existing = conversations.find(c => c.participants.some(p => p._id === userId));
+      if (existing) {
+        selectConversation(existing);
+        setSearchParams({}); // clear params
+      } else if (name) {
+        // Create temporary conversation for UI
+        setActiveConvo({
+          isNew: true,
+          _id: 'temp_' + userId,
+          participants: [user, { _id: userId, firstName: name.split(' ')[0], lastName: name.split(' ').slice(1).join(' ') }],
+          gigId: gigId
+        });
+      }
+    }
+  }, [searchParams, conversations, user]);
+
   const selectConversation = (convo) => {
     setActiveConvo(convo);
+    dispatch(setActiveConversationId(convo._id));
     dispatch(fetchMessages(convo._id));
     const socket = getSocket();
     if (socket) socket.emit('join_conversation', convo._id);
@@ -48,20 +89,47 @@ export default function ChatPage() {
   const getOtherUser = (convo) =>
     convo.participants?.find((p) => p._id !== user?._id);
 
-  const handleSend = (e) => {
+  const handleSend = async (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !activeConvo) return;
-    const socket = getSocket();
+    
     const other = getOtherUser(activeConvo);
-    if (socket) {
-      socket.emit('send_message', {
-        conversationId: activeConvo._id,
-        receiverId: other?._id,
-        content: newMessage.trim(),
-      });
-      socket.emit('stop_typing', { conversationId: activeConvo._id });
+    
+    if (activeConvo.isNew) {
+      // Use REST API for first message to create conversation in DB
+      try {
+        const res = await api.post('/messages/send', {
+          receiverId: other._id,
+          content: newMessage.trim(),
+          gigId: activeConvo.gigId
+        });
+        
+        const action = await dispatch(fetchConversations());
+        if (action.payload && action.payload.conversations) {
+          const newConvoId = res.data.data.conversationId;
+          const newConvo = action.payload.conversations.find(c => c._id === newConvoId);
+          if (newConvo) {
+            selectConversation(newConvo);
+          }
+        }
+        setSearchParams({});
+        setNewMessage('');
+      } catch (err) {
+        console.error("Failed to send first message:", err);
+        toast.error(err.response?.data?.message || "Failed to start conversation");
+      }
+    } else {
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('send_message', {
+          conversationId: activeConvo._id,
+          receiverId: other?._id,
+          content: newMessage.trim(),
+        });
+        socket.emit('stop_typing', { conversationId: activeConvo._id });
+      }
+      setNewMessage('');
     }
-    setNewMessage('');
   };
 
   const handleInputChange = (e) => {
@@ -127,6 +195,29 @@ export default function ChatPage() {
                 </button>
               );
             })
+          )}
+          
+          {/* Temporary Conversation (if new chat) */}
+          {activeConvo?.isNew && (
+            <button
+              className="w-full flex items-center gap-3 p-4 text-left border-b cursor-pointer bg-primary/5 border-l-2 border-l-primary"
+            >
+              <div className="relative shrink-0">
+                <Avatar className="h-10 w-10">
+                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                    {getOtherUser(activeConvo)?.firstName?.[0] || '?'}
+                  </AvatarFallback>
+                </Avatar>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">
+                  {getOtherUser(activeConvo)?.firstName} {getOtherUser(activeConvo)?.lastName}
+                </p>
+                <p className="text-xs text-muted-foreground truncate italic">
+                  New conversation
+                </p>
+              </div>
+            </button>
           )}
         </div>
       </div>

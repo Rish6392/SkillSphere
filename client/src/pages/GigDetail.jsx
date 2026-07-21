@@ -13,18 +13,35 @@ import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { MapPin, Clock, IndianRupee, Calendar, Paperclip, Send, User } from 'lucide-react';
+import { MapPin, Clock, IndianRupee, Calendar, Send, CheckCircle2, XCircle, MessageSquare, Star } from 'lucide-react';
 
 export default function GigDetail() {
   const { id } = useParams();
   const dispatch = useDispatch();
   const { currentGig: gig, loading } = useSelector((s) => s.gigs);
   const { user } = useSelector((s) => s.auth);
+
+  // Freelancer proposal form
   const [proposalForm, setProposalForm] = useState({ coverLetter: '', bidAmount: '', estimatedDuration: '' });
   const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
 
+  // Client proposals list
+  const [proposals, setProposals] = useState([]);
+  const [loadingProposals, setLoadingProposals] = useState(false);
+
   useEffect(() => { dispatch(fetchGigById(id)); }, [dispatch, id]);
+
+  // Fetch proposals if user is the client who owns this gig
+  useEffect(() => {
+    if (user?.role === 'client' && gig && gig.clientId?._id === user._id) {
+      setLoadingProposals(true);
+      api.get(`/proposals/gig/${id}`)
+        .then((r) => setProposals(r.data.proposals || []))
+        .catch(() => {})
+        .finally(() => setLoadingProposals(false));
+    }
+  }, [user, gig, id]);
 
   const handleProposal = async (e) => {
     e.preventDefault(); setSubmitting(true);
@@ -35,6 +52,18 @@ export default function GigDetail() {
     setSubmitting(false);
   };
 
+  const handleProposalAction = async (proposalId, action) => {
+    try {
+      await api.put(`/proposals/${proposalId}/${action}`);
+      setProposals(proposals.map((p) =>
+        p._id === proposalId ? { ...p, status: action === 'accept' ? 'accepted' : 'rejected' } : p
+      ));
+      toast.success(`Proposal ${action}ed!`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || `Failed to ${action} proposal`);
+    }
+  };
+
   if (loading || !gig) return (
     <div className="max-w-5xl mx-auto px-4 py-8 grid lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-4"><Skeleton className="h-8 w-3/4" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-5/6" /><Skeleton className="h-32 w-full" /></div>
@@ -42,12 +71,15 @@ export default function GigDetail() {
     </div>
   );
 
+  const isOwner = user?.role === 'client' && gig.clientId?._id === user?._id;
+
   return (
     <div className="min-h-screen py-8">
       <div className="max-w-5xl mx-auto px-4 sm:px-6">
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Main */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Gig Info */}
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-4">
@@ -88,7 +120,122 @@ export default function GigDetail() {
               </CardContent>
             </Card>
 
-            {/* Proposal Form */}
+            {/* ===== CLIENT: Proposals Section ===== */}
+            {isOwner && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <MessageSquare className="h-5 w-5 text-primary" />
+                      Proposals Received ({proposals.length})
+                    </CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {loadingProposals ? (
+                    <div className="space-y-4">
+                      {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-24 w-full rounded-lg" />)}
+                    </div>
+                  ) : proposals.length === 0 ? (
+                    <div className="text-center py-10">
+                      <MessageSquare className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
+                      <p className="text-sm text-muted-foreground">No proposals yet. Share your gig to attract freelancers!</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {proposals.map((proposal) => (
+                        <div key={proposal._id} className="border rounded-xl p-5 hover:shadow-sm transition-shadow">
+                          {/* Freelancer Info */}
+                          <div className="flex items-start justify-between mb-4">
+                            <div className="flex items-center gap-3">
+                              <Avatar className="h-10 w-10">
+                                <AvatarImage src={proposal.freelancerId?.avatar} />
+                                <AvatarFallback className="bg-primary/10 text-primary text-sm font-semibold">
+                                  {proposal.freelancerId?.firstName?.[0]}{proposal.freelancerId?.lastName?.[0]}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="text-sm font-semibold">{proposal.freelancerId?.firstName} {proposal.freelancerId?.lastName}</p>
+                                <p className="text-xs text-muted-foreground">{proposal.freelancerId?.email}</p>
+                              </div>
+                            </div>
+                            <Badge
+                              variant={
+                                proposal.status === 'accepted' ? 'success'
+                                : proposal.status === 'rejected' ? 'destructive'
+                                : 'warning'
+                              }
+                              className="text-[10px]"
+                            >
+                              {proposal.status?.toUpperCase()}
+                            </Badge>
+                          </div>
+
+                          {/* Bid Details */}
+                          <div className="flex items-center gap-6 mb-3">
+                            <div className="flex items-center gap-1.5">
+                              <IndianRupee className="h-4 w-4 text-primary" />
+                              <span className="text-base font-bold">₹{proposal.bidAmount?.toLocaleString()}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <Clock className="h-3.5 w-3.5" />
+                              <span className="text-sm">{proposal.estimatedDuration || 'Not specified'}</span>
+                            </div>
+                            {proposal.freelancerId?.reputationScore > 0 && (
+                              <div className="flex items-center gap-1 text-amber-500">
+                                <Star className="h-3.5 w-3.5 fill-current" />
+                                <span className="text-sm font-medium">{proposal.freelancerId.reputationScore?.toFixed(1)}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Cover Letter */}
+                          <div className="bg-muted/40 rounded-lg p-4 mb-4">
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Cover Letter</p>
+                            <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">{proposal.coverLetter}</p>
+                          </div>
+
+                          {/* Action Buttons — only show if pending */}
+                          {proposal.status === 'pending' && (
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                className="gap-1.5"
+                                onClick={() => handleProposalAction(proposal._id, 'accept')}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" /> Accept
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-1.5 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => handleProposalAction(proposal._id, 'reject')}
+                              >
+                                <XCircle className="h-3.5 w-3.5" /> Reject
+                              </Button>
+                              <Button variant="ghost" size="sm" asChild className="ml-auto">
+                                <Link to={`/chat?userId=${proposal.freelancerId?._id}&name=${encodeURIComponent(proposal.freelancerId?.firstName + ' ' + proposal.freelancerId?.lastName)}&gigId=${gig._id}`}>
+                                  <MessageSquare className="h-3.5 w-3.5 mr-1.5" /> Message
+                                </Link>
+                              </Button>
+                            </div>
+                          )}
+
+                          {proposal.status === 'accepted' && (
+                            <div className="flex items-center gap-2 p-3 rounded-lg bg-green-50 border border-green-200">
+                              <CheckCircle2 className="h-4 w-4 text-green-600" />
+                              <p className="text-sm text-green-700 font-medium">Proposal accepted — you can now start working with this freelancer!</p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ===== FREELANCER: Proposal Form ===== */}
             {user?.role === 'freelancer' && gig.status === 'open' && (
               <Card>
                 <CardContent className="p-6">

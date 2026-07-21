@@ -12,9 +12,22 @@ export const fetchMessages = createAsyncThunk('chat/messages', async (id, { reje
 
 const chatSlice = createSlice({
   name: 'chat',
-  initialState: { conversations: [], messages: [], onlineUsers: [], typingUsers: {}, loading: false },
+  initialState: { conversations: [], messages: [], onlineUsers: [], typingUsers: {}, loading: false, activeConversationId: null },
   reducers: {
-    addMessage: (s, a) => { s.messages.push(a.payload); },
+    setActiveConversationId: (s, a) => { s.activeConversationId = a.payload; },
+    addMessage: (s, a) => { 
+      const msg = a.payload;
+      // Update last message preview in conversation list
+      const convo = s.conversations.find(c => c._id === msg.conversationId);
+      if (convo) {
+        convo.lastMessage = msg.content;
+        convo.lastMessageAt = msg.createdAt;
+      }
+      // Only push to active message view if it belongs to the current chat
+      if (msg.conversationId === s.activeConversationId) {
+        s.messages.push(msg); 
+      }
+    },
     setOnlineUsers: (s, a) => { s.onlineUsers = a.payload; },
     setTyping: (s, a) => { const { conversationId, userId, isTyping } = a.payload; if (isTyping) s.typingUsers[conversationId] = userId; else delete s.typingUsers[conversationId]; },
   },
@@ -24,5 +37,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const { addMessage, setOnlineUsers, setTyping } = chatSlice.actions;
+export const { addMessage, setOnlineUsers, setTyping, setActiveConversationId } = chatSlice.actions;
 export default chatSlice.reducer;
