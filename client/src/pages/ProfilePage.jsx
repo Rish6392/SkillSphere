@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Camera, Mail, Briefcase, Star, Clock, CheckCircle2, X } from 'lucide-react';
+import { Camera, Mail, Briefcase, Star, Clock, CheckCircle2, X, IndianRupee } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { loginUser } from '@/redux/slices/authSlice'; // Re-using to update user state if needed
 
@@ -30,7 +30,7 @@ export default function ProfilePage() {
           setForm({
             headline: r.data.profile?.headline || '',
             bio: r.data.profile?.bio || '',
-            skills: r.data.profile?.skills?.join(', ') || '',
+            skills: r.data.profile?.skills?.map(s => s.name || s).join(', ') || '',
           });
         })
         .catch(() => {})
@@ -60,7 +60,7 @@ export default function ProfilePage() {
 
   const handleSaveProfile = async () => {
     try {
-      const skillsArray = form.skills.split(',').map(s => s.trim()).filter(Boolean);
+      const skillsArray = form.skills.split(',').map(s => ({ name: s.trim() })).filter(s => s.name);
       const { data } = await api.put('/freelancers/me/profile', {
         headline: form.headline,
         bio: form.bio,
@@ -184,8 +184,8 @@ export default function ProfilePage() {
                   <div>
                     <h3 className="text-sm font-semibold text-muted-foreground mb-3">Skills</h3>
                     <div className="flex flex-wrap gap-2">
-                      {profile?.skills?.length > 0 ? profile.skills.map((s) => (
-                        <Badge key={s} variant="secondary">{s}</Badge>
+                      {profile?.skills?.length > 0 ? profile.skills.map((s, index) => (
+                        <Badge key={s._id || s.name || s || index} variant="secondary">{s.name || s}</Badge>
                       )) : <p className="text-sm text-muted-foreground">No skills added yet.</p>}
                     </div>
                   </div>

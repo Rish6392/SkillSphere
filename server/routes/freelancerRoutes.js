@@ -21,7 +21,7 @@ router.get("/:id", getFreelancerById);
 
 // Protected — Freelancer only
 router.get("/me/profile", verifyToken, authorize("freelancer"), getMyProfile);
-router.put("/profile", verifyToken, authorize("freelancer"), updateFreelancerProfile);
+router.put("/me/profile", verifyToken, authorize("freelancer"), updateFreelancerProfile);
 router.post(
   "/portfolio",
   verifyToken,

@@ -6,21 +6,28 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Users, Briefcase, IndianRupee, AlertTriangle, ShieldCheck, Ban, CheckCircle2 } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
+import { Users, Briefcase, IndianRupee, AlertTriangle, ShieldCheck, Ban, CheckCircle2, XCircle, Eye, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function AdminDashboard() {
   const [dashboard, setDashboard] = useState(null);
   const [users, setUsers] = useState([]);
+  const [gigs, setGigs] = useState([]);
+  const [disputes, setDisputes] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       api.get('/admin/dashboard').catch(() => ({ data: {} })),
       api.get('/admin/users?limit=20').catch(() => ({ data: {} })),
-    ]).then(([d, u]) => {
+      api.get('/gigs?limit=20').catch(() => ({ data: {} })),
+      api.get('/admin/disputes?limit=20').catch(() => ({ data: {} })),
+    ]).then(([d, u, g, di]) => {
       setDashboard(d.data.dashboard);
       setUsers(u.data.users || []);
+      setGigs(g.data.gigs || []);
+      setDisputes(di.data.disputes || []);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -43,6 +50,20 @@ export default function AdminDashboard() {
       toast.success('Freelancer verified');
     } catch (e) {
       toast.error('Verification failed');
+    }
+  };
+
+  const handleGigAction = async (gigId, action) => {
+    try {
+      await api.put(`/admin/gigs/${gigId}/approve`, { action });
+      setGigs(gigs.map((g) =>
+        g._id === gigId
+          ? { ...g, isApprovedByAdmin: action === 'approve', status: action === 'reject' ? 'closed' : g.status }
+          : g
+      ));
+      toast.success(`Gig ${action === 'approve' ? 'approved' : 'rejected'} successfully`);
+    } catch (e) {
+      toast.error(`Failed to ${action} gig`);
     }
   };
 
@@ -72,14 +93,14 @@ export default function AdminDashboard() {
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="users">Users</TabsTrigger>
+            <TabsTrigger value="gigs">Gigs</TabsTrigger>
             <TabsTrigger value="disputes">Disputes</TabsTrigger>
           </TabsList>
 
-          {/* Overview Tab */}
+          {/* ===== Overview Tab ===== */}
           <TabsContent value="overview">
             {dashboard && (
               <div className="space-y-6">
-                {/* Stats */}
                 <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6">
                   {[
                     { icon: Users, label: 'Total Users', value: dashboard.users?.total || 0, sub: `${dashboard.users?.recentSignups || 0} new (30d)` },
@@ -102,9 +123,7 @@ export default function AdminDashboard() {
                   ))}
                 </div>
 
-                {/* Charts Row */}
                 <div className="grid lg:grid-cols-2 gap-6">
-                  {/* Top Categories */}
                   <Card>
                     <CardHeader><CardTitle>Top Categories</CardTitle></CardHeader>
                     <CardContent>
@@ -118,22 +137,16 @@ export default function AdminDashboard() {
                                 <span className="text-xs text-muted-foreground">{cat.count} gigs</span>
                               </div>
                               <div className="w-full bg-muted rounded-full h-2">
-                                <div
-                                  className="bg-primary h-2 rounded-full transition-all"
-                                  style={{ width: `${(cat.count / (dashboard.topCategories[0]?.count || 1)) * 100}%` }}
-                                />
+                                <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${(cat.count / (dashboard.topCategories[0]?.count || 1)) * 100}%` }} />
                               </div>
                             </div>
                           </div>
                         ))}
-                        {!dashboard.topCategories?.length && (
-                          <p className="text-sm text-muted-foreground text-center py-4">No data available</p>
-                        )}
+                        {!dashboard.topCategories?.length && <p className="text-sm text-muted-foreground text-center py-4">No data available</p>}
                       </div>
                     </CardContent>
                   </Card>
 
-                  {/* User Breakdown */}
                   <Card>
                     <CardHeader><CardTitle>User Breakdown</CardTitle></CardHeader>
                     <CardContent>
@@ -147,9 +160,7 @@ export default function AdminDashboard() {
                             <span className="text-sm flex-1">{item.label}</span>
                             <span className="text-lg font-bold">{item.value}</span>
                             <span className="text-xs text-muted-foreground w-14 text-right">
-                              {dashboard.users?.total > 0
-                                ? Math.round((item.value / dashboard.users.total) * 100)
-                                : 0}%
+                              {dashboard.users?.total > 0 ? Math.round((item.value / dashboard.users.total) * 100) : 0}%
                             </span>
                           </div>
                         ))}
@@ -161,7 +172,7 @@ export default function AdminDashboard() {
             )}
           </TabsContent>
 
-          {/* Users Tab */}
+          {/* ===== Users Tab ===== */}
           <TabsContent value="users">
             <Card className="mt-6">
               <CardContent className="p-0">
@@ -191,41 +202,32 @@ export default function AdminDashboard() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4">
-                            <Badge variant="secondary" className="capitalize text-[10px]">{u.role}</Badge>
-                          </td>
+                          <td className="px-6 py-4"><Badge variant="secondary" className="capitalize text-[10px]">{u.role}</Badge></td>
                           <td className="px-6 py-4">
                             <Badge variant={u.isSuspended ? 'destructive' : 'success'} className="text-[10px]">
                               {u.isSuspended ? 'Suspended' : 'Active'}
                             </Badge>
                           </td>
-                          <td className="px-6 py-4 text-xs text-muted-foreground">
-                            {new Date(u.createdAt).toLocaleDateString()}
-                          </td>
+                          <td className="px-6 py-4 text-xs text-muted-foreground">{new Date(u.createdAt).toLocaleDateString()}</td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex items-center justify-end gap-1">
                               {u.role === 'freelancer' && (
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleVerify(u._id)} title="Verify">
+                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleVerify(u._id)} title="Verify Freelancer">
                                   <ShieldCheck className="h-4 w-4 text-primary" />
                                 </Button>
                               )}
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
+                              <Button variant="ghost" size="icon" className="h-8 w-8"
                                 onClick={() => handleSuspend(u._id, u.isSuspended ? 'activate' : 'suspend')}
-                                title={u.isSuspended ? 'Activate' : 'Suspend'}
-                              >
-                                {u.isSuspended ? (
-                                  <CheckCircle2 className="h-4 w-4 text-green-600" />
-                                ) : (
-                                  <Ban className="h-4 w-4 text-destructive" />
-                                )}
+                                title={u.isSuspended ? 'Activate' : 'Suspend'}>
+                                {u.isSuspended ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Ban className="h-4 w-4 text-destructive" />}
                               </Button>
                             </div>
                           </td>
                         </tr>
                       ))}
+                      {users.length === 0 && (
+                        <tr><td colSpan={5} className="px-6 py-12 text-center text-muted-foreground text-sm">No users found</td></tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -233,15 +235,137 @@ export default function AdminDashboard() {
             </Card>
           </TabsContent>
 
-          {/* Disputes Tab */}
+          {/* ===== Gigs Tab (Approve / Reject) ===== */}
+          <TabsContent value="gigs">
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle>Gig Moderation</CardTitle>
+                <p className="text-sm text-muted-foreground">Review, approve, or reject gigs posted by clients</p>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left px-6 py-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Gig</th>
+                        <th className="text-left px-6 py-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Client</th>
+                        <th className="text-left px-6 py-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Category</th>
+                        <th className="text-left px-6 py-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Budget</th>
+                        <th className="text-left px-6 py-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Status</th>
+                        <th className="text-right px-6 py-4 text-xs font-medium text-muted-foreground uppercase tracking-wider">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gigs.map((gig) => (
+                        <tr key={gig._id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="px-6 py-4">
+                            <p className="text-sm font-medium max-w-xs truncate">{gig.title}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{new Date(gig.createdAt).toLocaleDateString()}</p>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-7 w-7">
+                                <AvatarFallback className="bg-primary/10 text-primary text-[10px]">
+                                  {gig.clientId?.firstName?.[0] || '?'}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="text-sm">{gig.clientId?.firstName || 'Unknown'} {gig.clientId?.lastName || ''}</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <Badge variant="secondary" className="text-[10px]">{gig.category || 'N/A'}</Badge>
+                          </td>
+                          <td className="px-6 py-4 text-sm">
+                            ₹{gig.budgetRange?.min?.toLocaleString()} – ₹{gig.budgetRange?.max?.toLocaleString()}
+                          </td>
+                          <td className="px-6 py-4">
+                            {gig.isApprovedByAdmin === true ? (
+                              <Badge variant="success" className="text-[10px]">Approved</Badge>
+                            ) : gig.status === 'closed' ? (
+                              <Badge variant="destructive" className="text-[10px]">Rejected</Badge>
+                            ) : (
+                              <Badge variant="warning" className="text-[10px]">Pending Review</Badge>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              {/* Approve */}
+                              {!gig.isApprovedByAdmin && gig.status !== 'closed' && (
+                                <Button
+                                  variant="ghost" size="sm"
+                                  className="h-8 gap-1 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                  onClick={() => handleGigAction(gig._id, 'approve')}
+                                  title="Approve Gig"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" /> Approve
+                                </Button>
+                              )}
+                              {/* Reject */}
+                              {gig.status !== 'closed' && (
+                                <Button
+                                  variant="ghost" size="sm"
+                                  className="h-8 gap-1 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  onClick={() => handleGigAction(gig._id, 'reject')}
+                                  title="Reject Gig"
+                                >
+                                  <XCircle className="h-3.5 w-3.5" /> Reject
+                                </Button>
+                              )}
+                              {gig.isApprovedByAdmin && (
+                                <span className="text-xs text-green-600 font-medium px-2">✓ Approved</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                      {gigs.length === 0 && (
+                        <tr><td colSpan={6} className="px-6 py-12 text-center text-muted-foreground text-sm">No gigs to moderate</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ===== Disputes Tab ===== */}
           <TabsContent value="disputes">
             <Card className="mt-6">
-              <CardHeader><CardTitle>Dispute Management</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle>Dispute Management</CardTitle>
+                <p className="text-sm text-muted-foreground">Review disputes raised between clients and freelancers</p>
+              </CardHeader>
               <CardContent>
-                <div className="text-center py-12">
-                  <AlertTriangle className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3" />
-                  <p className="text-muted-foreground text-sm">Disputes will be listed here with resolution controls</p>
-                </div>
+                {disputes.length === 0 ? (
+                  <div className="text-center py-12">
+                    <AlertTriangle className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3" />
+                    <p className="text-muted-foreground text-sm">No disputes found</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {disputes.map((d) => (
+                      <div key={d._id} className="flex items-start justify-between p-4 rounded-lg border hover:bg-muted/30 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Badge variant={d.status === 'open' ? 'warning' : d.status === 'resolved' ? 'success' : 'secondary'} className="text-[10px]">
+                              {d.status?.toUpperCase()}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">{new Date(d.createdAt).toLocaleDateString()}</span>
+                          </div>
+                          <p className="text-sm font-medium">{d.reason || 'No reason provided'}</p>
+                          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
+                            <span>Raised by: <strong className="text-foreground">{d.raisedBy?.firstName} {d.raisedBy?.lastName}</strong></span>
+                            <span>Against: <strong className="text-foreground">{d.against?.firstName} {d.against?.lastName}</strong></span>
+                            {d.gigId && <span>Gig: <strong className="text-foreground">{d.gigId.title}</strong></span>}
+                          </div>
+                        </div>
+                        <Button variant="outline" size="sm" className="shrink-0 ml-4">
+                          <Eye className="h-3.5 w-3.5 mr-1" /> Review
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

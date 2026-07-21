@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { ShieldCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function Register() {
@@ -14,15 +15,23 @@ export default function Register() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { loading, error } = useSelector((s) => s.auth);
-  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', password: '', role: searchParams.get('role') || 'client' });
+  const [form, setForm] = useState({
+    firstName: '', lastName: '', email: '', password: '',
+    role: searchParams.get('role') || 'client',
+    adminSecretKey: '',
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     dispatch(clearError());
-    const res = await dispatch(registerUser(form));
+    const payload = { ...form };
+    if (form.role !== 'admin') delete payload.adminSecretKey;
+    const res = await dispatch(registerUser(payload));
     if (res.meta.requestStatus === 'fulfilled') {
       toast.success('Account created!');
-      navigate(form.role === 'freelancer' ? '/dashboard/freelancer' : '/dashboard/client');
+      if (form.role === 'admin') navigate('/admin');
+      else if (form.role === 'freelancer') navigate('/dashboard/freelancer');
+      else navigate('/dashboard/client');
     } else toast.error(res.payload || 'Registration failed');
   };
 
@@ -39,10 +48,18 @@ export default function Register() {
         <CardContent>
           {/* Role Toggle */}
           <div className="flex p-1 rounded-lg bg-muted mb-6">
-            {['client', 'freelancer'].map((r) => (
-              <button key={r} onClick={() => setForm({ ...form, role: r })}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all cursor-pointer capitalize ${form.role === r ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                {r === 'client' ? '💼 Client' : '🚀 Freelancer'}
+            {[
+              { key: 'client', label: '💼 Client' },
+              { key: 'freelancer', label: '🚀 Freelancer' },
+              { key: 'admin', label: '🛡️ Admin' },
+            ].map((r) => (
+              <button key={r.key} onClick={() => setForm({ ...form, role: r.key })}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition-all cursor-pointer ${
+                  form.role === r.key
+                    ? 'bg-white text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}>
+                {r.label}
               </button>
             ))}
           </div>
@@ -66,6 +83,26 @@ export default function Register() {
               <Label htmlFor="password">Password</Label>
               <Input id="password" type="password" required minLength={6} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="Min 6 characters" />
             </div>
+
+            {/* Admin Secret Key — only visible when admin role is selected */}
+            {form.role === 'admin' && (
+              <div className="space-y-2 p-4 rounded-lg border border-amber-200 bg-amber-50">
+                <div className="flex items-center gap-2 mb-1">
+                  <ShieldCheck className="h-4 w-4 text-amber-600" />
+                  <Label htmlFor="adminKey" className="text-amber-800 font-semibold">Admin Secret Key</Label>
+                </div>
+                <Input
+                  id="adminKey"
+                  type="password"
+                  required
+                  value={form.adminSecretKey}
+                  onChange={(e) => setForm({ ...form, adminSecretKey: e.target.value })}
+                  placeholder="Enter admin secret key"
+                  className="border-amber-300 focus:ring-amber-500"
+                />
+                <p className="text-xs text-amber-600 mt-1">Contact the platform owner to get the admin key.</p>
+              </div>
+            )}
 
             {error && <p className="text-sm text-destructive bg-destructive/10 rounded-lg p-3">{error}</p>}
 

@@ -10,7 +10,7 @@ const mailSender = require("../utils/mailSender");
 // ==========================================
 exports.register = async (req, res) => {
   try {
-    const { firstName, lastName, email, password, role, phone, location } = req.body;
+    const { firstName, lastName, email, password, role, phone, location, adminSecretKey } = req.body;
 
     // Validate required fields
     if (!firstName || !lastName || !email || !password) {
@@ -29,9 +29,21 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Validate role
+    // Validate role — admin requires secret key
+    let userRole = "client";
     const validRoles = ["client", "freelancer"];
-    const userRole = validRoles.includes(role) ? role : "client";
+    if (validRoles.includes(role)) {
+      userRole = role;
+    } else if (role === "admin") {
+      const serverAdminKey = process.env.ADMIN_SECRET_KEY || "skillsphere-admin-2026";
+      if (!adminSecretKey || adminSecretKey !== serverAdminKey) {
+        return res.status(403).json({
+          success: false,
+          message: "Invalid admin secret key.",
+        });
+      }
+      userRole = "admin";
+    }
 
     // Create user
     const user = await User.create({
