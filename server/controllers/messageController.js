@@ -144,6 +144,105 @@ exports.sendMessage = async (req, res) => {
 };
 
 // ==========================================
+// SEND FILE MESSAGE (REST fallback)
+// ==========================================
+exports.sendFileMessage = async (req, res) => {
+  try {
+    const { receiverId, gigId, conversationId } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded." });
+    }
+
+    const validReceiverId = (receiverId && receiverId !== "undefined" && receiverId !== "null") ? receiverId : undefined;
+    if (!validReceiverId) {
+      return res.status(400).json({ success: false, message: "Invalid receiver ID." });
+    }
+
+    // Determine resource type for Cloudinary
+    let resourceType = "auto";
+    if (req.file.mimetype.startsWith("image")) resourceType = "image";
+    else if (req.file.mimetype.startsWith("video")) resourceType = "video";
+    else resourceType = "raw";
+    
+    const { uploadToCloudinary } = require("../middlewares/upload");
+    const uploadResult = await uploadToCloudinary(req.file.buffer, "messages", resourceType);
+
+    const validGigId = (gigId && gigId !== "undefined" && gigId !== "null") ? gigId : undefined;
+    const validConvoId = (conversationId && conversationId !== "undefined" && conversationId !== "null") ? conversationId : undefined;
+
+    // Find or create conversation
+    let conversation;
+    if (validConvoId) {
+      conversation = await Conversation.findById(validConvoId);
+    } 
+    if (!conversation) {
+      conversation = await Conversation.findOne({
+        participants: { $all: [req.user._id, validReceiverId] },
+      });
+      if (!conversation) {
+        conversation = await Conversation.create({
+          participants: [req.user._id, validReceiverId],
+          gigId: validGigId,
+        });
+      }
+    }
+
+    // Determine message type for DB
+    let messageType = "file";
+    if (req.file.mimetype.startsWith("image")) messageType = "image";
+    else if (req.file.mimetype.startsWith("video")) messageType = "video";
+
+    const filePayload = {
+      url: uploadResult.secure_url,
+      publicId: uploadResult.public_id,
+      fileName: req.file.originalname,
+      fileSize: req.file.size,
+      fileType: req.file.mimetype,
+    };
+
+    // Create message
+    const message = await Message.create({
+      conversationId: conversation._id,
+      senderId: req.user._id,
+      receiverId: validReceiverId,
+      content: uploadResult.secure_url,
+      messageType: messageType,
+      file: filePayload,
+    });
+
+    // Update conversation
+    conversation.lastMessage = `[${messageType.charAt(0).toUpperCase() + messageType.slice(1)}]`;
+    conversation.lastMessageAt = new Date();
+    const currentUnread = conversation.unreadCount.get(validReceiverId.toString()) || 0;
+    conversation.unreadCount.set(validReceiverId.toString(), currentUnread + 1);
+    await conversation.save();
+
+    // Populate sender info
+    await message.populate("senderId", "firstName lastName avatar");
+
+    // Emit via Socket.IO if available
+    const io = req.app.get("io");
+    if (io) {
+      io.to(validReceiverId.toString()).emit("new_message", message);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "File sent.",
+      data: message,
+    });
+  } catch (error) {
+    console.error("Upload error details:", error);
+    res.status(500).json({
+      success: false,
+      message: error?.message || (typeof error === 'string' ? error : "Failed to send file. Cloudinary error."),
+      error: error,
+    });
+  }
+};
+
+// ==========================================
 // MARK MESSAGES AS READ
 // ==========================================
 exports.markAsRead = async (req, res) => {

@@ -229,7 +229,7 @@ exports.uploadResume = async (req, res) => {
     }
 
     // Upload new resume
-    const result = await uploadToCloudinary(req.file.buffer, "resumes");
+    const result = await uploadToCloudinary(req.file.buffer, "resumes", "raw");
 
     profile.resume = {
       url: result.secure_url,

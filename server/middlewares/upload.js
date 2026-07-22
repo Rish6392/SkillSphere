@@ -51,6 +51,8 @@ const uploadToCloudinary = (buffer, folder, resourceType = "auto") => {
       {
         folder: `skillsphere/${folder}`,
         resource_type: resourceType,
+        use_filename: true,
+        unique_filename: true,
       },
       (error, result) => {
         if (error) reject(error);

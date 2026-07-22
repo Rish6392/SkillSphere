@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { Send, Image, MessageSquare } from 'lucide-react';
+import { Send, Image as ImageIcon, MessageSquare, Paperclip, Loader2 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import api from '@/services/api';
 import toast from 'react-hot-toast';
@@ -18,9 +18,11 @@ export default function ChatPage() {
   const [activeConvo, setActiveConvo] = useState(null);
   const [newMessage, setNewMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     dispatch(fetchConversations());
@@ -89,6 +91,28 @@ export default function ChatPage() {
   const getOtherUser = (convo) =>
     convo.participants?.find((p) => p._id !== user?._id);
 
+  const downloadAttachment = async (e, msg) => {
+    e.preventDefault();
+    if (!msg?.content) return;
+
+    try {
+      const response = await fetch(msg.content, { mode: 'cors' });
+      if (!response.ok) throw new Error('Download failed');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = msg.file?.fileName || 'attachment';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Attachment download failed:', error);
+      window.open(msg.content, '_blank', 'noopener noreferrer');
+    }
+  };
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !activeConvo) return;
@@ -145,6 +169,47 @@ export default function ChatPage() {
       setIsTyping(false);
       socket.emit('stop_typing', { conversationId: activeConvo._id });
     }, 2000);
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeConvo) return;
+    
+    const other = getOtherUser(activeConvo);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("receiverId", other._id);
+    
+    if (activeConvo.isNew) {
+      formData.append("gigId", activeConvo.gigId);
+    } else {
+      formData.append("conversationId", activeConvo._id);
+    }
+
+    setIsUploading(true);
+    try {
+      const res = await api.post('/messages/upload', formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+      
+      if (activeConvo.isNew) {
+         const action = await dispatch(fetchConversations());
+         if (action.payload && action.payload.conversations) {
+            const newConvoId = res.data.data.conversationId;
+            const newConvo = action.payload.conversations.find(c => c._id === newConvoId);
+            if (newConvo) selectConversation(newConvo);
+         }
+         setSearchParams({});
+      } else {
+         dispatch(addMessage(res.data.data));
+         dispatch(fetchConversations());
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to upload file");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   return (
@@ -276,7 +341,22 @@ export default function ChatPage() {
                           : 'bg-white border rounded-bl-sm'
                       }`}
                     >
-                      {msg.content}
+                      {msg.messageType === 'image' ? (
+                        <a href={msg.content} target="_blank" rel="noreferrer">
+                          <img src={msg.content} alt="Attachment" className="max-w-50 rounded-lg mt-1" />
+                        </a>
+                      ) : msg.messageType === 'file' || msg.messageType === 'video' ? (
+                        <button
+                          type="button"
+                          onClick={(e) => downloadAttachment(e, msg)}
+                          className="underline font-semibold flex items-center gap-1 text-left"
+                        >
+                          <Paperclip className="h-3 w-3" /> {msg.file?.fileName || 'Download Attachment'}
+                        </button>
+                      ) : (
+                        msg.content
+                      )}
+                      
                       <div
                         className={`text-[10px] mt-1 ${
                           isMine ? 'text-white/60' : 'text-muted-foreground'
@@ -321,16 +401,30 @@ export default function ChatPage() {
               onSubmit={handleSend}
               className="p-4 border-t bg-white flex items-center gap-2"
             >
-              <Button type="button" variant="ghost" size="icon">
-                <Image className="h-4 w-4 text-muted-foreground" />
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                className="hidden" 
+                accept="image/*,application/pdf,.doc,.docx"
+              />
+              <Button 
+                type="button" 
+                variant="ghost" 
+                size="icon"
+                disabled={isUploading}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                {isUploading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : <ImageIcon className="h-4 w-4 text-muted-foreground" />}
               </Button>
               <Input
                 value={newMessage}
                 onChange={handleInputChange}
                 placeholder="Type a message..."
                 className="flex-1"
+                disabled={isUploading}
               />
-              <Button type="submit" size="icon" disabled={!newMessage.trim()}>
+              <Button type="submit" size="icon" disabled={!newMessage.trim() || isUploading}>
                 <Send className="h-4 w-4" />
               </Button>
             </form>
